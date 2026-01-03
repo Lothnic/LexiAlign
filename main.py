@@ -5,7 +5,7 @@ from transformers import AutoModel,AutoTokenizer
 # CONFIG
 MODEL_NAME = "setu4993/LaBSE"
 
-device = "cuda" if torch.cuda_is_available() else "cpu"
+device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using device : {device}")
 
 # Loading the LaBSE model
