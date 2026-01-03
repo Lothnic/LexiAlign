@@ -78,8 +78,8 @@ def get_word_embeddings(leng):
             hindi_tokens = tokenizer(hindi_sentences[i], return_tensors='pt').to(device)
 
             '''
-            Now for the word embeddings we are using the last hidden state of the model which returns the embedding for
-            each token in the sentence.
+            Now for the word embeddings we are using the last hidden state of the model which returns the 
+            embedding for each token in the sentence.
             '''
             english_word_embeddings.append(model(**english_tokens).last_hidden_state.detach().cpu())
             hindi_word_embeddings.append(model(**hindi_tokens).last_hidden_state.detach().cpu())
@@ -100,8 +100,28 @@ def similarity(embed1,embed2):
     v1_normalised = v1 / norm1
     v2_normalised = v2 / norm2
 
-    return np.dot(v1_normalised, v2_normalised.T).item()
+    return np.dot(v1_normalised, v2_normalised.T)
 
+def compute_sim_matrix(eng_word_emb, hin_word_emb, eng_sent_emb, hin_sent_emb, threshold=0.5):
+    sent_sim = similarity(eng_sent_emb, hin_sent_emb)
+    if sent_sim < threshold:
+        return None
+    
+    # Shape: [1, seq_len, 768] -> extracting dimensions
+    num_eng_tokens = eng_word_emb.shape[1]
+    num_hin_tokens = hin_word_emb.shape[1]
+    
+    # Initialising matrix
+    matrix = np.zeros((num_eng_tokens, num_hin_tokens))
+    
+    for j in range(num_eng_tokens):
+        for k in range(num_hin_tokens):
+            # Slice correctly: [0, j, :] gives shape [768]
+            eng_token_vec = eng_word_emb[0, j, :]
+            hin_token_vec = hin_word_emb[0, k, :]
+            matrix[j, k] = similarity(eng_token_vec, hin_token_vec)
+    
+    return matrix
 
 if __name__=="__main__":
     english_embeddings, hindi_embeddings = get_sentence_embeddings(4)
@@ -126,25 +146,14 @@ if __name__=="__main__":
         print(english_embeddings[i].shape)
         # torch.Size([1, 768]) -> [batch_size, hidden_size]
 
-    
-    for i in range(4):
-        print(similarity(english_embeddings[i],hindi_embeddings[i]))
-
-    for i in range(4):
-        sim = similarity(english_embeddings[i], hindi_embeddings[i])
-        if sim > 0.5:
-            english_words = english_word_embeddings[i]
-            hindi_words = hindi_word_embeddings[i]
-            
-            # Initialize matrix for this sentence pair
-            sim_matrix = np.zeros((english_words.shape[1], hindi_words.shape[1]))
-
-            for j in range(english_words.shape[1]):
-                for k in range(hindi_words.shape[1]):
-                    # Compute similarity for each token pair
-                    sim_matrix[j, k] = similarity(english_words[:, j], hindi_words[:, k])
-            
+    for i in range(1,2):
+        matrix = compute_sim_matrix(
+            english_word_embeddings[i],
+            hindi_word_embeddings[i],
+            english_embeddings[i],
+            hindi_embeddings[i]
+        )
+        if matrix is not None:
             print(f"\nSimilarity Matrix for sentence {i}:")
-            print(sim_matrix)
-
-
+            print(matrix)
+            print(f"Best alignment: {per_row_argmax(matrix)}")
