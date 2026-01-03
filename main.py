@@ -130,6 +130,21 @@ def per_row_argmax(sim_matrix):
         alignments.append((i, int(best_match)))
     return alignments
 
+def bidir_argmax(sim_matrix):
+    forward = []
+    for i in range(sim_matrix.shape[0]):
+        best_match = np.argmax(sim_matrix[i])
+        forward.append((i, int(best_match)))
+
+    backward = []
+    for j in range(sim_matrix.shape[1]):
+        best_match = np.argmax(sim_matrix[:, j])
+        backward.append((int(best_match), j))
+
+    final_alignment = intersection(forward, backward)
+
+    return final_alignment
+
 if __name__=="__main__":
     english_embeddings, hindi_embeddings = get_sentence_embeddings(4)
     english_word_embeddings, hindi_word_embeddings = get_word_embeddings(4)
