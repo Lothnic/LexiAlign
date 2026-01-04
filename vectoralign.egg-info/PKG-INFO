@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: vectoralign
-Version: 0.1.0
+Version: 0.2.0
 Summary: Bilingual word alignment using multilingual embeddings - a spiritual implementation of SimAlign
 Author: Mayank Joshi
 License-Expression: MIT
@@ -70,6 +70,9 @@ dictionary = align(english, hindi)
 - **Batch processing** — Batch processing with automatic CUDA detection
 - **Multiple models** — Supports LaBSE, mBERT, and other HuggingFace models
 - **Bidirectional alignment** — Intersection of forward and backward alignments
+
+### Version 0.2.0 added features:
+- **Memory management** — Automatic garbage collection and CUDA cache management for efficient memory usage
 
 ## Advanced Usage
 
