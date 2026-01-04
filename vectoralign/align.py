@@ -162,7 +162,9 @@ def _build_dictionary(all_alignments):
 def _save_dictionary(dictionary, output_path="output/dict.txt"):
     """Save dictionary to file."""
     import os
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    dir_name = os.path.dirname(output_path)
+    if dir_name:  # Only makedirs if there's a directory component
+        os.makedirs(dir_name, exist_ok=True)
     
     sorted_dict = sorted(dictionary.items(), key=lambda x: x[1], reverse=True)
     
