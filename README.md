@@ -38,6 +38,9 @@ dictionary = align(english, hindi)
 - **Multiple models** — Supports LaBSE, mBERT, and other HuggingFace models
 - **Bidirectional alignment** — Intersection of forward and backward alignments
 
+### Version 0.2.0 added features:
+- **Memory management** — Automatic garbage collection and CUDA cache management for efficient memory usage
+
 ## Advanced Usage
 
 ```python

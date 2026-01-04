@@ -3,8 +3,8 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "lexialign"
-version = "0.1.0"
+name = "vectoralign"
+version = "0.2.0"
 description = "Bilingual word alignment using multilingual embeddings - a spiritual implementation of SimAlign"
 readme = "README.md"
 license = "MIT"
@@ -31,9 +31,9 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/lothnic/lexialign"
-Repository = "https://github.com/lothnic/lexialign"
-Issues = "https://github.com/lothnic/lexialign/issues"
+Homepage = "https://github.com/lothnic/vectoralign"
+Repository = "https://github.com/lothnic/vectoralign"
+Issues = "https://github.com/lothnic/vectoralign/issues"
 
 [project.optional-dependencies]
 dev = [
@@ -43,5 +43,5 @@ dev = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["lexialign*"]
+include = ["vectoralign*"]
 

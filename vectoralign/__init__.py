@@ -1,5 +1,5 @@
 """
-LexiAlign - Bilingual Word Alignment using Multilingual Embeddings
+VectorAlign - Bilingual Word Alignment using Multilingual Embeddings
 
 A spiritual implementation of SimAlign by CIS, LMU Munich.
 """

@@ -1,10 +1,11 @@
 """
-Core alignment functions for LexiAlign.
+Core alignment functions for VectorAlign.
 """
 
 import torch
 import torch.nn.functional as F
 from transformers import AutoModel, AutoTokenizer
+import gc
 import numpy as np
 from tqdm import tqdm
 import string
@@ -222,31 +223,38 @@ def align(
     print(f"Model loaded: {model_name}")
 
     NUM_SENTENCES = min(len(src_sentences), len(tgt_sentences))
-    src_embeddings, tgt_embeddings, src_word_embeddings, tgt_word_embeddings = get_embeddings_batch(
-        src_sentences, tgt_sentences, tokenizer, model, batch_size, device
-    )
-    
+
     all_alignments = []
-    
-    for i in tqdm(range(NUM_SENTENCES), desc="Aligning sentences"):
-        matrix = _compute_sim_matrix_batch(
-            src_word_embeddings[i],
-            tgt_word_embeddings[i],
-            src_embeddings[i],
-            tgt_embeddings[i],
-            threshold
+
+    for i in tqdm(range(0, NUM_SENTENCES, batch_size), desc="Processing sentences"):
+
+        src_embeddings, tgt_embeddings, src_word_embeddings, tgt_word_embeddings = get_embeddings_batch(
+            src_sentences[i:i+batch_size], tgt_sentences[i:i+batch_size], tokenizer, model, batch_size, device
         )
-        
-        if matrix is not None:
-            alignments = _bidir_argmax(matrix)
-            token_pairs = _convert_id_to_token(
-                alignments,
-                src_sentences[i],
-                tgt_sentences[i],
-                tokenizer
+    
+        for j in range(len(src_embeddings)):
+            matrix = _compute_sim_matrix_batch(
+                src_word_embeddings[j],
+                tgt_word_embeddings[j],
+                src_embeddings[j],
+                tgt_embeddings[j],
+                threshold
             )
-            merged_pairs = _merge_subwords(token_pairs)
-            all_alignments.extend(merged_pairs)
+            
+            if matrix is not None:
+                alignments = _bidir_argmax(matrix)
+                token_pairs = _convert_id_to_token(
+                    alignments,
+                    src_sentences[i+j],
+                    tgt_sentences[i+j],
+                    tokenizer
+                )
+                merged_pairs = _merge_subwords(token_pairs)
+                all_alignments.extend(merged_pairs)
+        
+        gc.collect()
+        if device == "cuda":
+            torch.cuda.empty_cache()
 
     dictionary = _build_dictionary(all_alignments)
     _save_dictionary(dictionary, output)
