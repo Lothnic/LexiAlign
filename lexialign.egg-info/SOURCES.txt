@@ -1,0 +1,10 @@
+LICENSE
+README.md
+pyproject.toml
+lexialign/__init__.py
+lexialign/align.py
+lexialign.egg-info/PKG-INFO
+lexialign.egg-info/SOURCES.txt
+lexialign.egg-info/dependency_links.txt
+lexialign.egg-info/requires.txt
+lexialign.egg-info/top_level.txt

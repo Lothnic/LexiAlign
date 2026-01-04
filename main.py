@@ -2,32 +2,8 @@ import torch
 import torch.nn.functional as F
 from transformers import AutoModel,AutoTokenizer
 import numpy as np
+from tqdm import tqdm
 import string
-
-# CONFIG
-MODEL_NAME = "setu4993/LaBSE"
-
-device = "cuda" if torch.cuda.is_available() else "cpu"
-print(f"Using device : {device}")
-
-# Loading the LaBSE model
-tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-model = AutoModel.from_pretrained(MODEL_NAME).to(device)
-model.eval()
-
-# Loading the data
-with open('data/english.txt','r', encoding='utf-8') as f:
-    english_sentences = f.read().strip().strip('\ufeff').split('\n')
-
-with open('data/hindi.txt','r',encoding='utf-8') as f:
-    hindi_sentences = f.read().strip().strip('\ufeff').split('\n')
-
-length = min(len(english_sentences),len(hindi_sentences))
-print(f'Length Of the data : {length}')
-
-# Preprocessing
-def clean_word(word):
-    return word.strip(string.punctuation).lower()
 
 def get_sentence_embeddings(leng):
     english_embeddings = []
@@ -89,6 +65,56 @@ def get_word_embeddings(leng):
     
     return english_word_embeddings, hindi_word_embeddings
 
+def get_embeddings_batch(src_sentences: list[str], tgt_sentences: list[str],tokenizer,model,batch_size=32,device='cpu'):
+    src_embeddings = []
+    tgt_embeddings = []
+    src_word_embeddings = []
+    tgt_word_embeddings = []
+    
+    length = min(len(src_sentences),len(tgt_sentences))
+    with torch.no_grad():
+        for i in tqdm(range(0,length,batch_size),desc="Embedding sentences"):
+            
+            batch_src = src_sentences[i:i+batch_size]
+            batch_tgt = tgt_sentences[i:i+batch_size]
+
+            src_tokens = tokenizer(batch_src, return_tensors='pt', padding=True, truncation=True).to(device)
+            tgt_tokens = tokenizer(batch_tgt, return_tensors='pt', padding=True, truncation=True).to(device)
+
+            '''
+            Up we were tokenising entire batch at once
+
+            Now we are doing the single forward pass for the batch of sentences
+            '''
+            src_out = model(**src_tokens)
+            tgt_out = model(**tgt_tokens)
+
+            src_embeddings.append(src_out.pooler_output.detach().cpu())
+            tgt_embeddings.append(tgt_out.pooler_output.detach().cpu())
+            src_word_embeddings.append(src_out.last_hidden_state.detach().cpu())
+            tgt_word_embeddings.append(tgt_out.last_hidden_state.detach().cpu())
+
+    src_embeddings = torch.cat(src_embeddings, dim=0)
+    tgt_embeddings = torch.cat(tgt_embeddings, dim=0)
+
+    src_embeddings = [e.unsqueeze(0) for e in src_embeddings]
+    tgt_embeddings = [e.unsqueeze(0) for e in tgt_embeddings]
+
+    # Flatten word embeddings: each batch has different seq_len, so we split individually
+    src_word_flat = []
+    tgt_word_flat = []
+    
+    for batch in src_word_embeddings:
+        for j in range(batch.shape[0]):
+            src_word_flat.append(batch[j:j+1])  # [1, seq_len, 768]
+
+    for batch in tgt_word_embeddings:
+        for j in range(batch.shape[0]):
+            tgt_word_flat.append(batch[j:j+1])  # [1, seq_len, 768]
+
+    return src_embeddings, tgt_embeddings, src_word_flat, tgt_word_flat
+
+
 def similarity(embed1,embed2):
     # return cosine similarity with normalisation
     v1 = embed1.detach().cpu().numpy()
@@ -102,26 +128,45 @@ def similarity(embed1,embed2):
 
     return np.dot(v1_normalised, v2_normalised.T)
 
-def compute_sim_matrix(eng_word_emb, hin_word_emb, eng_sent_emb, hin_sent_emb, threshold=0.5):
-    sent_sim = similarity(eng_sent_emb, hin_sent_emb)
+def compute_sim_matrix(src_word_emb, tgt_word_emb, src_sent_emb, tgt_sent_emb, threshold=0.5):
+    sent_sim = similarity(src_sent_emb, tgt_sent_emb)
     if sent_sim < threshold:
         return None
     
     # Shape: [1, seq_len, 768] -> extracting dimensions
-    num_eng_tokens = eng_word_emb.shape[1]
-    num_hin_tokens = hin_word_emb.shape[1]
+    num_src_tokens = src_word_emb.shape[1]
+    num_tgt_tokens = tgt_word_emb.shape[1]
     
     # Initialising matrix
-    matrix = np.zeros((num_eng_tokens, num_hin_tokens))
+    matrix = np.zeros((num_src_tokens, num_tgt_tokens))
     
-    for j in range(num_eng_tokens):
-        for k in range(num_hin_tokens):
-            # Slice correctly: [0, j, :] gives shape [768]
-            eng_token_vec = eng_word_emb[0, j, :]
-            hin_token_vec = hin_word_emb[0, k, :]
-            matrix[j, k] = similarity(eng_token_vec, hin_token_vec)
+    for j in range(num_src_tokens):
+        for k in range(num_tgt_tokens):
+            src_token_vec = src_word_emb[0, j, :]
+            tgt_token_vec = tgt_word_emb[0, k, :]
+            matrix[j, k] = similarity(src_token_vec, tgt_token_vec)
     
     return matrix
+
+def compute_sim_matrix_batch(src_word_emb, tgt_word_emb, src_sent_emb, tgt_sent_emb, threshold=0.5):
+    '''
+    Computation of matrix operation is faster in pytorch due to C optimisations.
+    '''
+    sent_sim = F.cosine_similarity(src_sent_emb, tgt_sent_emb, dim=-1).item()
+    
+    if sent_sim < threshold:
+        return None
+
+    # Squeeze to [seq_len, hidden_size]
+    src_tokens = src_word_emb.squeeze(0)  # [src_len, 768]
+    tgt_tokens = tgt_word_emb.squeeze(0)  # [tgt_len, 768]
+    
+    src_norm = F.normalize(src_tokens, dim=-1)
+    tgt_norm = F.normalize(tgt_tokens, dim=-1)
+    
+    # MatMul gives cosine similarity when vectors are normalized
+    sim_matrix = torch.matmul(src_norm, tgt_norm.T) 
+    return sim_matrix
 
 def per_row_argmax(sim_matrix):
     alignments = []
@@ -133,57 +178,60 @@ def per_row_argmax(sim_matrix):
 def bidir_argmax(sim_matrix):
     forward = []
     for i in range(sim_matrix.shape[0]):
-        best_match = np.argmax(sim_matrix[i])
+        best_match = torch.argmax(sim_matrix[i])
         forward.append((i, int(best_match)))
 
     backward = []
     for j in range(sim_matrix.shape[1]):
-        best_match = np.argmax(sim_matrix[:, j])
+        best_match = torch.argmax(sim_matrix[:, j])
         backward.append((int(best_match), j))
 
-    # Set intersection works better for tuples
     final_alignment = set(forward) & set(backward)
 
     return list(final_alignment)
 
-def convert_id_to_token(alignments, eng_sentence, hin_sentence):
+def convert_id_to_token(alignments, src_sentence, tgt_sentence, tokenizer):
     # Get tokens with special markers
-    eng_tokens = ["[CLS]"] + tokenizer.tokenize(eng_sentence) + ["[SEP]"]
-    hin_tokens = ["[CLS]"] + tokenizer.tokenize(hin_sentence) + ["[SEP]"]
+    src_tokens = ["[CLS]"] + tokenizer.tokenize(src_sentence) + ["[SEP]"]
+    tgt_tokens = ["[CLS]"] + tokenizer.tokenize(tgt_sentence) + ["[SEP]"]
     
     aligned_pairs = []
     
-    for (eng_idx, hin_idx) in alignments:
+    for (src_idx, tgt_idx) in alignments:
+        # Skip if index is out of bounds (PAD token positions from batching)
+        if src_idx >= len(src_tokens) or tgt_idx >= len(tgt_tokens):
+            continue
+        
         # Skip special tokens [CLS] (index 0) and [SEP] (last index)
-        if eng_idx == 0 or eng_idx == len(eng_tokens) - 1:
+        if src_idx == 0 or src_idx == len(src_tokens) - 1:
             continue
-        if hin_idx == 0 or hin_idx == len(hin_tokens) - 1:
+        if tgt_idx == 0 or tgt_idx == len(tgt_tokens) - 1:
             continue
         
-        eng_token = eng_tokens[eng_idx]
-        hin_token = hin_tokens[hin_idx]
+        src_token = src_tokens[src_idx]
+        tgt_token = tgt_tokens[tgt_idx]
         
-        aligned_pairs.append((eng_token, hin_token))
+        aligned_pairs.append((src_token, tgt_token))
     
     return aligned_pairs
 
 def merge_subwords(aligned_pairs):
     merged = []
-    current_eng = ""
-    current_hin = ""
+    current_src = ""
+    current_tgt = ""
     
-    for (eng_tok, hin_tok) in aligned_pairs:
-        if eng_tok.startswith("##"):
-            current_eng += eng_tok[2:]  # Remove ## prefix
+    for (src_tok, tgt_tok) in aligned_pairs:
+        if src_tok.startswith("##"):
+            current_src += src_tok[2:]  # Remove ## prefix
         else:
-            if current_eng:
-                merged.append((current_eng, current_hin))
-            current_eng = eng_tok
-            current_hin = hin_tok
+            if current_src:
+                merged.append((current_src, current_tgt))
+            current_src = src_tok
+            current_tgt = tgt_tok
     
     # Don't forget the last pair
-    if current_eng:
-        merged.append((current_eng, current_hin))
+    if current_src:
+        merged.append((current_src, current_tgt))
     
     return merged
 
@@ -192,70 +240,87 @@ def build_dictionary(all_alignments):
     
     dictionary = defaultdict(int)
     
-    for (eng, hin) in all_alignments:
-        # Clean tokens
-        eng_clean = eng.lower().strip(string.punctuation)
-        hin_clean = hin.strip()
+    for (src, tgt) in all_alignments:
+        src_clean = src.lower().strip(string.punctuation)
+        tgt_clean = tgt.strip()
         
-        if eng_clean and hin_clean:  # Skip empty tokens
-            dictionary[(eng_clean, hin_clean)] += 1
+        if src_clean and tgt_clean:
+            dictionary[(src_clean, tgt_clean)] += 1
     
     return dict(dictionary)
 
-def save_dictionary(dictionary, output_path="output/bilingual_dict.txt"):
+def save_dictionary(dictionary, output_path="output/dict.txt"):
     import os
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     
     sorted_dict = sorted(dictionary.items(), key=lambda x: x[1], reverse=True)
     
     with open(output_path, 'w', encoding='utf-8') as f:
-        for (eng, hin), count in sorted_dict:
-            f.write(f"{eng}\t{hin}\t{count}\n")
+        for (src, tgt), count in sorted_dict:
+            if count > 1:
+                f.write(f"{src}\t{tgt}\t{count}\n")
     
-    print(f"Dictionary saved to {output_path} with {len(sorted_dict)} entries")
+    print(f"Dictionary saved to {output_path}")
 
+def align(src_sentences: list[str], tgt_sentences: list[str],batch_size: int=32,model_name="bert",mode='multilingual',output='output/dict.txt'):
 
-if __name__=="__main__":
-    NUM_SENTENCES = 100
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"Using device : {device}")
+
+    if model_name=="bert":
+        if mode=='multilingual':
+            tokenizer = AutoTokenizer.from_pretrained("bert-base-multilingual-cased")
+            model = AutoModel.from_pretrained("bert-base-multilingual-cased").to(device)
+            model.eval()
+        else:
+            tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
+            model = AutoModel.from_pretrained("bert-base-uncased").to(device)
+            model.eval()
+    else:
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
+        print("Model Loaded")
+        model = AutoModel.from_pretrained(model_name).to(device)
+        model.eval()
+
+    NUM_SENTENCES = len(src_sentences)
+    src_embeddings, tgt_embeddings, src_word_embeddings, tgt_word_embeddings = get_embeddings_batch(src_sentences, tgt_sentences, tokenizer, model, batch_size,device)
     
-    print("Step 1: Getting embeddings...")
-    english_embeddings, hindi_embeddings = get_sentence_embeddings(NUM_SENTENCES)
-    english_word_embeddings, hindi_word_embeddings = get_word_embeddings(NUM_SENTENCES)
-    
-    print("\nStep 2: Computing alignments...")
     all_alignments = []
     
-    for i in range(NUM_SENTENCES):
-        matrix = compute_sim_matrix(
-            english_word_embeddings[i],
-            hindi_word_embeddings[i],
-            english_embeddings[i],
-            hindi_embeddings[i]
+    for i in tqdm(range(NUM_SENTENCES),desc="Aligning sentences"):
+        matrix = compute_sim_matrix_batch(
+            src_word_embeddings[i],
+            tgt_word_embeddings[i],
+            src_embeddings[i],
+            tgt_embeddings[i]
         )
         
         if matrix is not None:
-            # Get bidirectional alignments
             alignments = bidir_argmax(matrix)
-            
-            # Convert indices to tokens
+
             token_pairs = convert_id_to_token(
                 alignments,
-                english_sentences[i],
-                hindi_sentences[i]
+                src_sentences[i],
+                tgt_sentences[i],
+                tokenizer
             )
-            
-            # Merge subwords
             merged_pairs = merge_subwords(token_pairs)
-            
-            # Add to all alignments
             all_alignments.extend(merged_pairs)
-            
-            # Print progress
-            if (i + 1) % 10 == 0:
-                print(f"Processed {i + 1}/{NUM_SENTENCES} sentences")
-    
-    print(f"\nStep 3: Building dictionary from {len(all_alignments)} alignment pairs...")
+
     dictionary = build_dictionary(all_alignments)
+    save_dictionary(dictionary,output)
+
     
-    print(f"\nStep 4: Saving dictionary...")
-    save_dictionary(dictionary)
+if __name__=="__main__":
+        
+    # CONFIG
+    MODEL_NAME = "setu4993/LaBSE"
+
+    # Loading the data
+    with open('data/english.txt','r', encoding='utf-8') as f:
+        english_sentences = f.read().strip().strip('\ufeff').split('\n')
+
+    with open('data/hindi.txt','r',encoding='utf-8') as f:
+        hindi_sentences = f.read().strip().strip('\ufeff').split('\n')
+
+    align(english_sentences,hindi_sentences,model_name=MODEL_NAME,batch_size=128)
