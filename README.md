@@ -75,7 +75,7 @@ word2    translation2    count
 
 ## Acknowledgments
 
-This is a spiritual implementation of [SimAlign](https://github.com/cisnlp/simalign) by the Centre for Language and Information Processing, LMU Munich.
+This is a spiritual implementation and improvement of [SimAlign](https://github.com/cisnlp/simalign) by the Centre for Language and Information Processing, LMU Munich.
 
 - [Paper](https://arxiv.org/pdf/2004.08728)
 

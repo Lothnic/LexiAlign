@@ -169,6 +169,7 @@ def _save_dictionary(dictionary, output_path="output/dict.txt"):
     sorted_dict = sorted(dictionary.items(), key=lambda x: x[1], reverse=True)
     
     with open(output_path, 'w', encoding='utf-8') as f:
+        f.write("src\ttgt\tfreq\n")
         for (src, tgt), count in sorted_dict:
             if count > 1:
                 f.write(f"{src}\t{tgt}\t{count}\n")
